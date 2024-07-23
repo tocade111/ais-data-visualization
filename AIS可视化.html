@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>高德地图AIS数据可视化</title>
+    <style>
+        body, html {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #mapContainer {
+            width: 100%;
+            height: 80%;
+        }
+        #searchContainer {
+            width: 100%;
+            height: 20%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+    <script type="text/javascript" src="https://webapi.amap.com/maps?v=2.0&key=fc97a25724c8b815f82563339e07fbb9"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+</head>
+<body>
+    <div id="mapContainer"></div>
+    <div id="searchContainer">
+        <input type="text" id="mmsiInput" placeholder="输入 MMSI">
+        <button onclick="searchShip()">搜索</button>
+    </div>
+    <script type="text/javascript">
+        var map = new AMap.Map('mapContainer', {
+            zoom: 5,
+            center: [120.152792, 30.267446]
+        });
+
+        console.log("地图加载成功");
+
+        var ships = {};
+        var markers = {};
+
+        // 通过 HTTP 协议访问 CSV 文件
+        var csvFilePath = 'http://localhost:8000/ais数据.csv'; // 替换为实际的 URL
+
+        Papa.parse(csvFilePath, {
+            download: true,
+            header: true,
+            complete: function(results) {
+                console.log("CSV 数据解析完成", results.data);
+                var data = results.data;
+
+                if (!data.length) {
+                    console.error("CSV 文件没有数据");
+                    return;
+                }
+
+                // 初始化船只数据
+                data.forEach(function(record) {
+                    console.log("记录", record); // 调试：打印每条记录
+                    if (!ships[record.MMSI]) {
+                        ships[record.MMSI] = [];
+                    }
+                    ships[record.MMSI].push(record);
+                });
+
+                // 按时间排序
+                for (var mmsi in ships) {
+                    ships[mmsi].sort(function(a, b) {
+                        return new Date(a.time) - new Date(b.time);
+                    });
+                }
+
+                // 初始化标记
+                updateShips();
+            },
+            error: function(error) {
+                console.error("CSV 数据解析错误", error);
+            }
+        });
+
+        function updateShips() {
+            var currentTime = new Date().getTime();
+            console.log("当前时间:", currentTime);
+
+            for (var mmsi in ships) {
+                var shipData = ships[mmsi];
+                var latestRecord = shipData[0];
+
+                console.log("MMSI:", mmsi, "数据:", shipData);
+
+                for (var i = 0; i < shipData.length; i++) {
+                    var recordTime = new Date(parseInt(shipData[i].time) * 1000).getTime();
+                    if (recordTime <= currentTime) {
+                        latestRecord = shipData[i];
+                    } else {
+                        break;
+                    }
+                }
+
+                var position = new AMap.LngLat(latestRecord.longitude, latestRecord.latitude);
+                if (markers[mmsi]) {
+                    markers[mmsi].setPosition(position);
+                } else {
+                    var marker = new AMap.Marker({
+                        position: position,
+                        title: `MMSI: ${latestRecord.MMSI}, Speed: ${latestRecord.sog}, Course: ${latestRecord.cog}, Status: ${latestRecord.status}`
+                    });
+
+                    marker.content = `<div>MMSI: ${latestRecord.MMSI}</div><div>Speed: ${latestRecord.sog}</div><div>Course: ${latestRecord.cog}</div><div>Status: ${latestRecord.status}</div>`;
+                    marker.on('click', function(e) {
+                        var infoWindow = new AMap.InfoWindow({
+                            content: e.target.content
+                        });
+                        infoWindow.open(map, e.target.getPosition());
+                    });
+
+                    markers[mmsi] = marker;
+                    map.add(marker);
+                }
+            }
+
+            setTimeout(updateShips, 5000); // 每5秒更新一次
+        }
+
+        function searchShip() {
+            var mmsi = document.getElementById('mmsiInput').value;
+            if (markers[mmsi]) {
+                map.setCenter(markers[mmsi].getPosition());
+                markers[mmsi].emit('click', {target: markers[mmsi]});
+            } else {
+                alert('Ship not found');
+            }
+        }
+    </script>
+</body>
+</html>
